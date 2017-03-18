@@ -3,12 +3,15 @@ import sys
 import os
 import datetime
 import threading
+import json
 
 from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 from pyspark.sql import SQLContext, Row
 from pyspark.ml.feature import RegexTokenizer
+
+from textblob import TextBlob
 
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
@@ -30,20 +33,18 @@ class StreamClass(threading.Thread):
 
     def run(self):
         print "Starting Stream Layer: " + self.name
-        # Kafka emits tuples, so we need to acces to the second element
-        lines = self.kvs.map(lambda line: line[1]).cache()
-
-        # save to HDFS
-        lines.foreachRDD(save_stream)
+        # TODO Stream layer goes here... (copy the main method)
 
         self.streaming_context.start()
         self.streaming_context.awaitTermination()
 
 
-def parse_tweet(tweet_json):
+def parse_tweet(tweet_string):
+    tweet_json = json.loads(tweet_string)
     return Row(
         id_str=tweet_json["id_str"],
-        text=tweet_json['text'].encode('utf-8')
+        text=tweet_json['text'],
+        sentiment=TextBlob(tweet_json["text"]).sentiment[0]
     )
 
 
@@ -83,6 +84,9 @@ if __name__ == "__main__":
 
     # save to HDFS
     tweets.foreachRDD(save_stream)
+
+    tweets = tweets.map(parse_tweet)
+    tweets.pprint(1)
 
     ssc.start()
     ssc.awaitTermination()
