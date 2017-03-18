@@ -1,21 +1,23 @@
 # -*- coding: utf-8 -*-
 import os
 import time
+import json
+
 from kafka import KafkaProducer
-
-
 from twython import TwythonStreamer
 
 
 class TwitterStream(TwythonStreamer):
     def __init__(self, *args, **kwargs):
         super(TwitterStream, self).__init__(*args, **kwargs)
-        self.producer = KafkaProducer(bootstrap_servers='localhost:9092')
+        self.producer = KafkaProducer(
+            bootstrap_servers='localhost:9092',
+            value_serializer=lambda v: json.dumps(v).encode('utf-8')
+        )
 
     def on_success(self, data):
         if 'text' in data:
-            tweet_text = data['text'].encode('utf-8')
-            self.producer.send("test", tweet_text)
+            self.producer.send("test", data)
             time.sleep(0.1)
 
     def on_error(self, status_code, data):
