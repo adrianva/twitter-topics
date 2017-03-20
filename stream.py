@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import sys
 import os
 import datetime
 import threading
@@ -9,7 +8,6 @@ from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 from pyspark.sql import SQLContext, Row
-from pyspark.ml.feature import RegexTokenizer
 
 from textblob import TextBlob
 
@@ -39,13 +37,23 @@ class StreamClass(threading.Thread):
         self.streaming_context.awaitTermination()
 
 
-def parse_tweet(tweet_string):
-    tweet_json = json.loads(tweet_string)
-    return Row(
-        id_str=tweet_json["id_str"],
-        text=tweet_json['text'],
-        sentiment=TextBlob(tweet_json["text"]).sentiment[0]
-    )
+def parse_tweets(tweets):
+    tweets = tweets.map(lambda tweet: to_row(tweet))
+    return tweets
+
+
+def to_row(tweet_json):
+    tweet_json.pop('entities', None)
+    tweet_json.pop('extended_entities', None)
+    tweet_json.pop('retweeted_status', None)
+
+    text_blob = TextBlob(tweet_json["text"])
+    word_counts = text_blob.word_counts
+    sentiment = text_blob.sentiment
+    tweet_json["sentiment"] = {"polarity": sentiment.polarity, "subjectivity": sentiment.subjectivity}
+    tweet_json["word_counts"] = dict(word_counts)
+
+    return Row(**tweet_json)
 
 
 def save_stream(rdd):
@@ -57,9 +65,22 @@ def get_words(lines):
     return words
 
 
-def word_tokenize(line):
-    import nltk
-    return nltk.word_tokenize(line)
+def save_to_elastic(rdd):
+    es_write_conf = {
+        "es.nodes": "localhost",
+        "es.port": "9200",
+        "es.resource": "twitter/tweet",
+        "es.mapping.id": "id_str"
+    }
+
+    rdd_to_elastic = rdd.map(lambda row: (None, row.asDict()))
+    rdd_to_elastic.saveAsNewAPIHadoopFile(
+        path='-',
+        outputFormatClass="org.elasticsearch.hadoop.mr.EsOutputFormat",
+        keyClass="org.apache.hadoop.io.NullWritable",
+        valueClass="org.elasticsearch.hadoop.mr.LinkedMapWritable",
+        conf=es_write_conf
+    )
 
 
 if __name__ == "__main__":
@@ -80,13 +101,13 @@ if __name__ == "__main__":
 
     kvs = KafkaUtils.createDirectStream(ssc, topics, {"metadata.broker.list": brokers})
     # Kafka emits tuples, so we need to acces to the second element
-    tweets = kvs.map(lambda tweet: tweet[1]).cache()
+    tweets = kvs.map(lambda tweet: json.loads(tweet[1])).cache()
 
     # save to HDFS
     tweets.foreachRDD(save_stream)
 
-    tweets = tweets.map(parse_tweet)
-    tweets.pprint(1)
+    tweets = parse_tweets(tweets)
+    tweets.foreachRDD(save_to_elastic)
 
     ssc.start()
     ssc.awaitTermination()
