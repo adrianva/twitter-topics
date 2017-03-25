@@ -43,9 +43,12 @@ def parse_tweets(tweets):
 
 
 def to_row(tweet_json):
+    # TODO See how to index lists (or elements which contain lists...)
     tweet_json.pop('entities', None)
     tweet_json.pop('extended_entities', None)
+    tweet_json.pop('extended_tweet', None)
     tweet_json.pop('retweeted_status', None)
+    tweet_json.pop('quoted_status', None)
 
     text_blob = TextBlob(tweet_json["text"])
     word_counts = text_blob.word_counts
@@ -70,7 +73,8 @@ def save_to_elastic(rdd):
         "es.nodes": "localhost",
         "es.port": "9200",
         "es.resource": "twitter/tweet",
-        "es.mapping.id": "id_str"
+        "es.mapping.id": "id_str",
+        "es.mapping.timestamp": "timestamp_ms"
     }
 
     rdd_to_elastic = rdd.map(lambda row: (None, row.asDict()))
