@@ -32,7 +32,6 @@ class StreamClass(threading.Thread):
     def run(self):
         print "Starting Stream Layer: " + self.name
         # TODO Stream layer goes here... (copy the main method)
-
         self.streaming_context.start()
         self.streaming_context.awaitTermination()
 
@@ -43,20 +42,23 @@ def parse_tweets(tweets):
 
 
 def to_row(tweet_json):
-    # TODO See how to index lists (or elements which contain lists...)
-    tweet_json.pop('entities', None)
-    tweet_json.pop('extended_entities', None)
-    tweet_json.pop('extended_tweet', None)
-    tweet_json.pop('retweeted_status', None)
-    tweet_json.pop('quoted_status', None)
-
     text_blob = TextBlob(tweet_json["text"])
     word_counts = text_blob.word_counts
     sentiment = text_blob.sentiment
     tweet_json["sentiment"] = {"polarity": sentiment.polarity, "subjectivity": sentiment.subjectivity}
     tweet_json["word_counts"] = dict(word_counts)
 
-    return Row(**tweet_json)
+    return Row(
+        id_str=tweet_json["id_str"],
+        text=tweet_json["text"],
+        timestamp_ms=tweet_json["timestamp_ms"],
+        created_at=tweet_json["created_at"],
+        user={
+            "screen_name": tweet_json["user"]["screen_name"],
+            "time_zone": tweet_json["user"]["time_zone"]
+        },
+        sentiment=tweet_json["sentiment"]
+    )
 
 
 def save_stream(rdd):
@@ -105,11 +107,12 @@ if __name__ == "__main__":
 
     kvs = KafkaUtils.createDirectStream(ssc, topics, {"metadata.broker.list": brokers})
     # Kafka emits tuples, so we need to acces to the second element
-    tweets = kvs.map(lambda tweet: json.loads(tweet[1])).cache()
+    tweets = kvs.map(lambda tweet: tweet[1]).cache()
 
     # save to HDFS
     tweets.foreachRDD(save_stream)
 
+    tweets = tweets.map(lambda tweet: json.loads(tweet))  # Convert strings to dicts
     tweets = parse_tweets(tweets)
     tweets.foreachRDD(save_to_elastic)
 
