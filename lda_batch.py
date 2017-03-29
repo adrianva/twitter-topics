@@ -2,15 +2,12 @@ import os
 import threading
 import json
 
+from pyspark.ml import Pipeline
 from pyspark.mllib.clustering import LDA, LDAModel
 from pyspark.mllib.linalg import Vectors
-from pyspark.ml.feature import CountVectorizer
+from pyspark.ml.feature import CountVectorizer, RegexTokenizer
 from pyspark.sql import SparkSession, Row
 from pyspark.sql.types import *
-
-from textblob import TextBlob
-
-import utils
 
 
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
@@ -38,7 +35,7 @@ def load_texts_from_s3(sc):
             texts = tweets.map(
                 lambda tweet: Row(
                     id=int(tweet["id_str"]),
-                    words=_converto_to_list_of_strings(TextBlob(tweet["text"]).words)
+                    text=tweet["text"]
                 )
             )
             print texts.take(10)
@@ -50,6 +47,16 @@ def load_texts_from_s3(sc):
 
 def _converto_to_list_of_strings(words_list):
     return [word.string for word in words_list]
+
+
+def print_topics(lda_model):
+    # Output topics. Each is a distribution over words (matching word count vectors)
+    print("Learned topics (as distributions over vocab of " + str(lda_model.vocabSize()) + " words):")
+    topics = lda_model.topicsMatrix()
+    for topic in range(3):
+        print("Topic " + str(topic) + ":")
+        for word in range(0, lda_model.vocabSize()):
+            print(" " + str(topics[word][topic]))
 
 
 if __name__ == "__main__":
@@ -65,11 +72,16 @@ if __name__ == "__main__":
     texts = load_texts_from_s3(sc)
     schema = StructType([
         StructField("id", LongType(), True),
-        StructField("words", ArrayType(StringType()), True),
+        StructField("text", StringType(), True),
     ])
     texts_df = spark.createDataFrame(texts, schema=schema)
+
+    re_tokenizer = RegexTokenizer(inputCol="text", outputCol="words", pattern="\\W")
     cv = CountVectorizer(inputCol="words", outputCol="vectors")
-    model = cv.fit(texts_df)
+    pipeline = Pipeline(stages=[re_tokenizer, cv])
+
+    model = pipeline.fit(texts_df)
+
     result = model.transform(texts_df)
 
     # Index documents with unique IDs
@@ -78,13 +90,7 @@ if __name__ == "__main__":
     # Cluster the documents into three topics using LDA
     lda_model = LDA.train(corpus, k=3)
 
-    # Output topics. Each is a distribution over words (matching word count vectors)
-    print("Learned topics (as distributions over vocab of " + str(lda_model.vocabSize()) + " words):")
-    topics = lda_model.topicsMatrix()
-    for topic in range(3):
-        print("Topic " + str(topic) + ":")
-        for word in range(0, lda_model.vocabSize()):
-            print(" " + str(topics[word][topic]))
+    print_topics(lda_model)
 
     # Save and load model
     lda_model.save(sc, "target/LDAModel")
