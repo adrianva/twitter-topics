@@ -95,8 +95,6 @@ if __name__ == "__main__":
     sql_context = SQLContext(sc)
     ssc.checkpoint("checkpoint")
 
-    print AWS_ACCESS_KEY_ID
-    print AWS_SECRET_ACCESS_KEY
     sc._jsc.hadoopConfiguration().set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
     sc._jsc.hadoopConfiguration().set('fs.s3a.access.key', AWS_ACCESS_KEY_ID)
     sc._jsc.hadoopConfiguration().set('fs.s3a.secret.key', AWS_SECRET_ACCESS_KEY)
