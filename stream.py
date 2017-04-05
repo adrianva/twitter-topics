@@ -9,6 +9,7 @@ from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 from pyspark.sql import SQLContext, Row
 
+from kafka import KafkaProducer
 from textblob import TextBlob
 
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
@@ -89,6 +90,36 @@ def save_to_elastic(rdd):
     )
 
 
+def write_to_kafka(elements):
+    kafka_config = {
+        "host": "localhost:9092",
+        "topic": "druid"
+    }
+
+    kafka_sink = KafkaSink(kafka_config)
+    for element in elements:
+        kafka_sink.send(element)
+
+    kafka_sink.producer.close()
+
+
+class KafkaSink:
+    DEFAULT_CONFIG = {"host": "localhost:9092"}
+
+    def __init__(self, config=DEFAULT_CONFIG):
+        self.producer = KafkaProducer(
+            bootstrap_servers=config["host"],
+            value_serializer=lambda v: json.dumps(v).encode('utf-8')
+        )
+        self.config = config
+
+    def send(self, value):
+        try:
+            self.producer.send(self.config["topic"], value)
+        except AttributeError:
+            raise AttributeError("topic not defined")
+
+
 if __name__ == "__main__":
     sc = SparkContext(appName="Stream Layer", master="local[2]")
     ssc = StreamingContext(sc, 10)
@@ -113,6 +144,7 @@ if __name__ == "__main__":
     tweets = tweets.map(lambda tweet: json.loads(tweet))  # Convert strings to dicts
     tweets = parse_tweets(tweets)
     tweets.foreachRDD(save_to_elastic)
+    tweets.foreachRDD(lambda rdd: rdd.foreachPartition(write_to_kafka))
 
     ssc.start()
     ssc.awaitTermination()
