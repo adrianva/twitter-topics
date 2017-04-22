@@ -1,10 +1,12 @@
+# -*- coding: utf-8 -*-
+import sys
 import os
-import threading
 import json
+import codecs
 
 from pyspark.ml import Pipeline
-from pyspark.mllib.clustering import LDA, LDAModel
-from pyspark.mllib.linalg import Vectors
+from pyspark.ml.clustering import LDA, LDAModel
+from pyspark.ml.linalg import Vectors
 from pyspark.ml.feature import CountVectorizer, RegexTokenizer, StopWordsRemover
 from pyspark.sql import SparkSession, Row
 from pyspark.sql.types import *
@@ -14,19 +16,6 @@ AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 
 NUMBER_OF_TOPICS = 3
-
-
-class BatchClass(threading.Thread):
-    def __init__(self, spark_context=None):
-        super(BatchClass, self).__init__()
-        self.spark_context = spark_context
-        spark_context._jsc.hadoopConfiguration().set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        spark_context._jsc.hadoopConfiguration().set('fs.s3a.access.key', AWS_ACCESS_KEY_ID)
-        spark_context._jsc.hadoopConfiguration().set('fs.s3a.secret.key', AWS_SECRET_ACCESS_KEY)
-
-    def run(self):
-        print "Starting Batch Layer: " + self.name
-        # TODO Batch layer goes here... (copy the main method)
 
 
 def load_texts_from_s3():
@@ -88,6 +77,9 @@ def print_topic(topic, i):
 
 
 if __name__ == "__main__":
+    sys.stdout = codecs.getwriter('utf8')(sys.stdout)
+    sys.stderr = codecs.getwriter('utf8')(sys.stderr)
+
     spark = SparkSession.builder.appName("LDA Batch Model").getOrCreate()
     sc = spark.sparkContext
 
@@ -109,15 +101,17 @@ if __name__ == "__main__":
     corpus = result.select("id", "vectors").rdd.map(lambda (x, y): [x, Vectors.fromML(y)]).cache()
 
     # Cluster the documents into three topics using LDA
-    lda_model = LDA.train(corpus, k=NUMBER_OF_TOPICS)
+    lda = LDA(k=NUMBER_OF_TOPICS, maxIter=5, featuresCol="vectors")
+    lda_model = lda.fit(result)
 
-    vocabulary = model.stages[2].vocabulary
-    topic_indices = sc.parallelize(lda_model.describeTopics(maxTermsPerTopic=20))
+    # Describe topics
+    topics = lda_model.describeTopics(3)
+    print("The topics described by their top-weighted terms:")
+    topics.show(truncate=False)
 
-    topics = topic_indices\
-        .map(lambda (terms, weights): map(lambda (term, weight): (vocabulary[int(term)], weight), zip(terms, weights)))
-
-    print_topics(topics)
+    # Shows the result
+    transformed = lda_model.transform(result)
+    transformed.show(truncate=False)
 
     # Save and load model
     lda_model.save(sc, "s3a://current-models/LDAModel")
