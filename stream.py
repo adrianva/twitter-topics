@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import datetime
-import threading
 import json
 
 from pyspark import SparkContext
@@ -16,27 +15,6 @@ AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 
 
-class StreamClass(threading.Thread):
-    # Kafka connection
-    DEFAULT_BROKER = 'localhost:9092'
-    DEFAULT_TOPIC = ['test']
-
-    def __init__(self, spark_context=None, batch_duration=5, brokers=DEFAULT_BROKER, topics=DEFAULT_TOPIC):
-        super(StreamClass, self).__init__()
-        self.spark_context = spark_context
-        self.streaming_context = StreamingContext(spark_context, batchDuration=batch_duration)
-        self.sql_context = SQLContext(spark_context)
-        self.streaming_context.checkpoint("checkpoint")
-
-        self.kvs = KafkaUtils.createDirectStream(self.streaming_context, topics, {"metadata.broker.list": brokers})
-
-    def run(self):
-        print "Starting Stream Layer: " + self.name
-        # TODO Stream layer goes here... (copy the main method)
-        self.streaming_context.start()
-        self.streaming_context.awaitTermination()
-
-
 def parse_tweets(tweets):
     tweets = tweets.map(lambda tweet: to_row(tweet))
     return tweets
@@ -48,6 +26,7 @@ def to_row(tweet_json):
     sentiment = text_blob.sentiment
     tweet_json["sentiment"] = {"polarity": sentiment.polarity, "subjectivity": sentiment.subjectivity}
     tweet_json["word_counts"] = dict(word_counts)
+    coordinates = tweet_json["coordinates"].get("coordinates")
 
     return Row(
         id_str=tweet_json["id_str"],
@@ -58,17 +37,13 @@ def to_row(tweet_json):
             "screen_name": tweet_json["user"]["screen_name"],
             "time_zone": tweet_json["user"]["time_zone"]
         },
-        sentiment=tweet_json["sentiment"]
+        sentiment=tweet_json["sentiment"],
+        coordinates=coordinates
     )
 
 
 def save_stream(rdd):
     rdd.saveAsTextFile("s3a://twitter-topics-tweets-streaming/" + datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
-
-
-def get_words(lines):
-    words = lines.flatMap(lambda line: line.split())
-    return words
 
 
 def save_to_elastic(rdd):
@@ -93,7 +68,7 @@ def save_to_elastic(rdd):
 def write_to_kafka(elements):
     kafka_config = {
         "host": "localhost:9092",
-        "topic": "druid"
+        "topic": "aggregated_tweets"
     }
 
     kafka_sink = KafkaSink(kafka_config)
@@ -132,7 +107,7 @@ if __name__ == "__main__":
 
     # Kafka connection
     brokers = 'localhost:9092'
-    topics = ["test"]
+    topics = ["raw_tweets"]
 
     kvs = KafkaUtils.createDirectStream(ssc, topics, {"metadata.broker.list": brokers})
     # Kafka emits tuples, so we need to acces to the second element

@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
 import time
 import json
 
@@ -17,7 +16,7 @@ class TwitterStream(TwythonStreamer):
 
     def on_success(self, data):
         if 'text' in data:
-            self.producer.send("test", data)
+            self.producer.send("raw_tweets", data)
             time.sleep(0.1)
 
     def on_error(self, status_code, data):
