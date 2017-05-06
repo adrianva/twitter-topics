@@ -6,40 +6,20 @@ import json
 from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
-from pyspark.sql import SQLContext, Row
+from pyspark.sql import SQLContext
 
 from kafka import KafkaProducer
-from textblob import TextBlob
+
+from tweet import Tweet
+
 
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 
 
 def parse_tweets(tweets):
-    tweets = tweets.map(lambda tweet: to_row(tweet))
+    tweets = tweets.map(lambda tweet: Tweet.to_row(tweet))
     return tweets
-
-
-def to_row(tweet_json):
-    text_blob = TextBlob(tweet_json["text"])
-    word_counts = text_blob.word_counts
-    sentiment = text_blob.sentiment
-    tweet_json["sentiment"] = {"polarity": sentiment.polarity, "subjectivity": sentiment.subjectivity}
-    tweet_json["word_counts"] = dict(word_counts)
-    coordinates = tweet_json["coordinates"].get("coordinates")
-
-    return Row(
-        id_str=tweet_json["id_str"],
-        text=tweet_json["text"],
-        timestamp_ms=tweet_json["timestamp_ms"],
-        created_at=tweet_json["created_at"],
-        user={
-            "screen_name": tweet_json["user"]["screen_name"],
-            "time_zone": tweet_json["user"]["time_zone"]
-        },
-        sentiment=tweet_json["sentiment"],
-        coordinates=coordinates
-    )
 
 
 def save_stream(rdd):
@@ -68,12 +48,12 @@ def save_to_elastic(rdd):
 def write_to_kafka(elements):
     kafka_config = {
         "host": "localhost:9092",
-        "topic": "aggregated_tweets"
+        "topic": "processed_tweets"
     }
 
     kafka_sink = KafkaSink(kafka_config)
     for element in elements:
-        kafka_sink.send(element)
+        kafka_sink.send(element.asDict())
 
     kafka_sink.producer.close()
 
@@ -99,7 +79,7 @@ if __name__ == "__main__":
     sc = SparkContext(appName="Stream Layer", master="local[2]")
     ssc = StreamingContext(sc, 10)
     sql_context = SQLContext(sc)
-    ssc.checkpoint("checkpoint")
+    ssc.checkpoint("checkpoint_stream")
 
     sc._jsc.hadoopConfiguration().set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
     sc._jsc.hadoopConfiguration().set('fs.s3a.access.key', AWS_ACCESS_KEY_ID)
@@ -120,6 +100,8 @@ if __name__ == "__main__":
     tweets = parse_tweets(tweets)
     tweets.foreachRDD(save_to_elastic)
     tweets.foreachRDD(lambda rdd: rdd.foreachPartition(write_to_kafka))
+
+    tweets.pprint(5)
 
     ssc.start()
     ssc.awaitTermination()

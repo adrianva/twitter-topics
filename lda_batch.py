@@ -1,58 +1,21 @@
 # -*- coding: utf-8 -*-
 import sys
 import os
-import json
 import codecs
 
 from pyspark.ml import Pipeline
 from pyspark.ml.clustering import LDA, LDAModel
 from pyspark.ml.linalg import Vectors
 from pyspark.ml.feature import CountVectorizer, RegexTokenizer, StopWordsRemover
-from pyspark.sql import SparkSession, Row
-from pyspark.sql.types import *
+from pyspark.sql import SparkSession
 
+
+import utils
 
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 
 NUMBER_OF_TOPICS = 3
-
-
-def load_texts_from_s3():
-    try:
-        tweets = sc.textFile("s3a://twitter-topics-tweets-streaming/*/*")
-        if tweets:
-            tweets = tweets.map(lambda tweet: json.loads(tweet))
-            texts = tweets.map(
-                lambda tweet: Row(
-                    id=int(tweet["id_str"]),
-                    text=tweet["text"]
-                )
-            )
-            print texts.take(10)
-            return texts
-        return None
-    except OSError:
-        print "Directory is empty..."
-
-
-def load_stop_words():
-    stop_words_text = sc.textFile("resources/stop_words")
-    stop_words = stop_words_text.flatMap(lambda text: text.strip().split(","))
-    return stop_words.collect()
-
-
-def load_texts():
-    """
-    :return: A DataFrame with all documents plus their ids
-    """
-    texts = load_texts_from_s3()
-    schema = StructType([
-        StructField("id", LongType(), True),
-        StructField("text", StringType(), True),
-    ])
-    texts_df = spark.createDataFrame(texts, schema=schema)
-    return texts_df
 
 
 def set_pipeline(custom_stop_words=None):
@@ -89,8 +52,8 @@ if __name__ == "__main__":
     sc._jsc.hadoopConfiguration().set('fs.s3a.access.key', AWS_ACCESS_KEY_ID)
     sc._jsc.hadoopConfiguration().set('fs.s3a.secret.key', AWS_SECRET_ACCESS_KEY)
 
-    custom_stop_words = load_stop_words()
-    texts_df = load_texts()
+    custom_stop_words = utils.load_stop_words(sc)
+    texts_df = utils.load_texts(spark)
 
     pipeline = set_pipeline(custom_stop_words)
     model = pipeline.fit(texts_df)
