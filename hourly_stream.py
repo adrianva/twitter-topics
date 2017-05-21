@@ -7,6 +7,8 @@ from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 from pyspark.sql import SQLContext
 
+from influxdb import InfluxDBClient
+
 from tweet import Tweet
 
 
@@ -15,13 +17,6 @@ def get_hour(timestamp_ms):
     # String format: YYMMDDHH00 (e.g: 20170504120000 -> 2017-05-04 12:00:00)
     hour_str = d.strftime('%Y')+d.strftime('%m')+d.strftime('%d')+d.strftime('%H')+"0000"
     return hour_str
-
-
-def get_word_count(texts):
-    return texts.flatMap(lambda line: line.split(" "))\
-        .filter(lambda line: line != "")\
-        .map(lambda word: (word, 1))\
-        .reduceByKey(lambda a, b: a + b)
 
 
 def sum_tweets(new_values, last_sum):
@@ -44,6 +39,25 @@ def reduce_by_key_and_window(elements, window_duration, slide_duration):
         .transform(lambda x: x.sortBy(lambda (x, v): -v))
 
 
+def save_to_influx(iter):
+    client = InfluxDBClient("localhost", 8086, database="hourly_tweets")
+
+    for record in iter:
+        json_body = [
+            {
+                "measurement": "number_of_tweets",
+                "tags": {
+                    "topic": None,
+                },
+                "time": record[0] * 1000000,  # nanoseconds
+                "fields": {
+                    "value": record[1],
+                }
+            }
+        ]
+        client.write_points(json_body)
+
+
 if __name__ == "__main__":
     sc = SparkContext(appName="Hourly Aggregation", master="local[2]")
     ssc = StreamingContext(sc, 10)
@@ -59,7 +73,7 @@ if __name__ == "__main__":
     tweets_raw = kvs.map(lambda tweet: tweet[1]).cache()
     kvs.pprint(5)
 
-    # The key is the topic and the hour of the tweet
+    # TODO The key is the topic and the hour of the tweet
     tweets_raw = tweets_raw.map(lambda tweet: json.loads(tweet))  # Convert strings to dicts
     tweets = tweets_raw.map(lambda tweet: Tweet.to_row(tweet)) \
         .map(lambda tweet: (get_hour(tweet.timestamp_ms), 1)) \
@@ -70,6 +84,8 @@ if __name__ == "__main__":
     )
 
     tweets_last_hour.pprint(5)
+
+    tweets_last_hour.foreachRDD(lambda rdd: rdd.foreachPartition(save_to_influx))
 
     ssc.start()
     ssc.awaitTermination()

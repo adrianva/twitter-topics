@@ -77,7 +77,7 @@ if __name__ == "__main__":
     transformed.show(truncate=False)
 
     # Save and load model
-    lda_model.save(sc, "s3a://current-models/LDAModel")
+    lda_model.save("s3a://current-models/LDAModel")
     same_model = LDAModel.load(sc, "s3a://current-models/LDAModel")
 
     sc.stop()
