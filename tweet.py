@@ -22,5 +22,4 @@ class Tweet:
                 "time_zone": tweet_json["user"]["time_zone"]
             },
             sentiment=tweet_json["sentiment"],
-            topics=None
         )

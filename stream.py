@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import datetime
 import json
 
 from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
-from pyspark.sql import SQLContext
+from pyspark.sql import SQLContext, Row
+from pyspark.sql.types import StructType, StructField, FloatType, StringType, MapType
+from pyspark.ml.clustering import LDA, LocalLDAModel
 
+import utils
+import ml_utils
 from tweet import Tweet
 from kafka_utils.kafka_sink import KafkaSink
-
 
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
@@ -31,7 +35,7 @@ def save_to_elastic(rdd):
         "es.port": "9200",
         "es.resource": "twitter/tweet",
         "es.mapping.id": "id_str",
-        "es.mapping.timestamp": "timestamp_ms"
+        "es.mapping.timestamp": "timestamp_ms",
     }
 
     rdd_to_elastic = rdd.map(lambda row: (None, row.asDict()))
@@ -57,6 +61,70 @@ def write_to_kafka(elements):
     kafka_sink.producer.close()
 
 
+def classify_tweets(time, rdd):
+    # Get the singleton instance of SparkSession
+    spark = utils.get_spark_session_instance(rdd.context.getConf())
+
+    # Filter tweets without text
+    row_rdd = rdd.map(lambda tweet: Row(
+            id_str=tweet["id_str"],
+            text=tweet["text"],
+            timestamp_ms=tweet["timestamp_ms"],
+            created_at=tweet["created_at"],
+            user=tweet["user"],
+            sentiment=tweet["sentiment"]
+    )).filter(lambda tweet: tweet["text"])
+    print row_rdd.take(5)
+
+    schema = StructType([
+        StructField("id_str", StringType(), True),
+        StructField("text", StringType(), True),
+        StructField("timestamp_ms", StringType(), True),
+        StructField("created_at", StringType(), True),
+        StructField("user", MapType(StringType(), StringType()), True),
+        StructField("sentiment", MapType(StringType(), FloatType()), True),
+    ])
+    tweets_df = spark.createDataFrame(row_rdd, schema=schema)
+
+    # Fit the texts in the LDA model and get the topics
+    try:
+        custom_stop_words = []
+        pipeline = ml_utils.set_pipeline(custom_stop_words)
+        model = pipeline.fit(tweets_df)
+
+        result = model.transform(tweets_df)
+
+        lda_model = LocalLDAModel.load("s3a://current-models/LDAModel")
+
+        prediction = lda_model.transform(result)
+        prediction.show(truncate=True)
+
+        tweets_with_prediction = prediction.rdd.map(lambda tweet: Row(
+            id_str=tweet["id_str"],
+            text=tweet["text"],
+            timestamp_ms=int(tweet["timestamp_ms"]),
+            created_at=tweet["created_at"],
+            user=tweet["user"],
+            sentiment=tweet["sentiment"],
+            #topic_distribution=tuple(tweet["topicDistribution"].toArray().tolist()),
+            topic_distribution=topic_distibution_to_dict(tweet["topicDistribution"])
+        ))
+        print tweets_with_prediction.take(5)
+
+        save_to_elastic(tweets_with_prediction)
+        tweets_with_prediction.foreachPartition(write_to_kafka)
+    except Exception:
+        print sys.exc_info()
+
+
+def topic_distibution_to_dict(topic_distribution):
+    topic_distribution_dict = {}
+    for count, topic_probability in enumerate(topic_distribution.toArray().tolist()):
+        topic_distribution_dict["topic_{}".format(count)] = topic_probability
+
+    return topic_distribution_dict
+
+
 if __name__ == "__main__":
     sc = SparkContext(appName="Stream Layer", master="local[2]")
     ssc = StreamingContext(sc, 10)
@@ -80,10 +148,13 @@ if __name__ == "__main__":
 
     tweets = tweets.map(lambda tweet: json.loads(tweet))  # Convert strings to dicts
     tweets = parse_tweets(tweets)
-    tweets.foreachRDD(save_to_elastic)
-    tweets.foreachRDD(lambda rdd: rdd.foreachPartition(write_to_kafka))
+
+    #tweets.foreachRDD(save_to_elastic)
+    #tweets.foreachRDD(lambda rdd: rdd.foreachPartition(write_to_kafka))
 
     tweets.pprint(5)
+
+    tweets.foreachRDD(classify_tweets)
 
     ssc.start()
     ssc.awaitTermination()
