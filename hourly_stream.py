@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 import json
 from datetime import datetime
+import calendar
 
 from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
-from pyspark.sql import SQLContext
+from pyspark.sql import SQLContext, Row
 
 from influxdb import InfluxDBClient
-
-from tweet import Tweet
 
 
 def get_hour(timestamp_ms):
@@ -43,18 +42,22 @@ def save_to_influx(iter):
     client = InfluxDBClient("localhost", 8086, database="hourly_tweets")
 
     for record in iter:
+        datetime_object = datetime.strptime(record[0][1], '%Y%m%d%H%M%S')
+        timestamp_ns = calendar.timegm(datetime_object.timetuple()) * 1000000  # nanoseconds
+
         json_body = [
             {
                 "measurement": "number_of_tweets",
                 "tags": {
-                    "topic": None,
+                    "topic": record[0][0],
                 },
-                "time": record[0] * 1000000,  # nanoseconds
+                "time": int(timestamp_ns),
                 "fields": {
                     "value": record[1],
                 }
             }
         ]
+        #print json_body
         client.write_points(json_body)
 
 
@@ -73,10 +76,12 @@ if __name__ == "__main__":
     tweets_raw = kvs.map(lambda tweet: tweet[1]).cache()
     kvs.pprint(5)
 
-    # TODO The key is the topic and the hour of the tweet
     tweets_raw = tweets_raw.map(lambda tweet: json.loads(tweet))  # Convert strings to dicts
-    tweets = tweets_raw.map(lambda tweet: Tweet.to_row(tweet)) \
-        .map(lambda tweet: (get_hour(tweet.timestamp_ms), 1)) \
+    tweets = tweets_raw.map(lambda tweet: Row(
+        timestamp_ms=tweet["timestamp_ms"],
+        key=tweet["key"],
+        value=tweet["value"]
+     )).map(lambda tweet: ((tweet.key, get_hour(tweet.timestamp_ms)), tweet.value))
 
     tweets_by_date = update_state_by_key(tweets, sum_tweets)
     tweets_last_hour = reduce_by_key_and_window(

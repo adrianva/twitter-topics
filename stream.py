@@ -9,7 +9,7 @@ from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 from pyspark.sql import SQLContext, Row
 from pyspark.sql.types import StructType, StructField, FloatType, StringType, MapType
-from pyspark.ml.clustering import LDA, LocalLDAModel
+from pyspark.ml.clustering import LocalLDAModel
 
 import utils
 import ml_utils
@@ -64,6 +64,7 @@ def write_to_kafka(elements):
 def classify_tweets(time, rdd):
     # Get the singleton instance of SparkSession
     spark = utils.get_spark_session_instance(rdd.context.getConf())
+    sql_context = SQLContext(spark.sparkContext)
 
     # Filter tweets without text
     row_rdd = rdd.map(lambda tweet: Row(
@@ -106,13 +107,17 @@ def classify_tweets(time, rdd):
             created_at=tweet["created_at"],
             user=tweet["user"],
             sentiment=tweet["sentiment"],
-            #topic_distribution=tuple(tweet["topicDistribution"].toArray().tolist()),
             topic_distribution=topic_distibution_to_dict(tweet["topicDistribution"])
         ))
         print tweets_with_prediction.take(5)
 
         save_to_elastic(tweets_with_prediction)
-        tweets_with_prediction.foreachPartition(write_to_kafka)
+
+        tweets_with_prediction_df = sql_context.createDataFrame(tweets_with_prediction)
+        tweets_with_prediction_df.registerTempTable("tweets")
+        exploded_tweets = sql_context.sql("select id_str, timestamp_ms, explode(topic_distribution) from tweets")
+        print exploded_tweets.take(5)
+        exploded_tweets.foreachPartition(write_to_kafka)
     except Exception:
         print sys.exc_info()
 
@@ -128,7 +133,6 @@ def topic_distibution_to_dict(topic_distribution):
 if __name__ == "__main__":
     sc = SparkContext(appName="Stream Layer", master="local[2]")
     ssc = StreamingContext(sc, 10)
-    sql_context = SQLContext(sc)
     ssc.checkpoint("checkpoint_stream")
 
     sc._jsc.hadoopConfiguration().set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
@@ -148,9 +152,6 @@ if __name__ == "__main__":
 
     tweets = tweets.map(lambda tweet: json.loads(tweet))  # Convert strings to dicts
     tweets = parse_tweets(tweets)
-
-    #tweets.foreachRDD(save_to_elastic)
-    #tweets.foreachRDD(lambda rdd: rdd.foreachPartition(write_to_kafka))
 
     tweets.pprint(5)
 
