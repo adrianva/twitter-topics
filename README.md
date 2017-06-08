@@ -14,6 +14,7 @@ pip install -r requirements.txt
 
 We also must install Elasticsearch and InfluxDB for the database side.
 
+Then, install Kafka:
 > Apache Kafka is an open-source stream processing platform developed by the Apache Software Foundation written in Scala and Java. The project aims to provide a unified, high-throughput, low-latency platform for handling real-time data feeds.
 
 And finally, we could install Grafana and Kibana as an easy way to visualize the results, but it's not required.
