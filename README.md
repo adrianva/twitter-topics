@@ -6,6 +6,9 @@ Topic extraction from Streaming Twitter API, implementing some Lambda Architectu
 * InfluxDB and Elasticsearch
 * Kafka
 * Kibana and Grafana (optional)
+* Spark (version 2.0 or above)
+
+This tutorial will explain how to install the project in a local environment, but this should be easily extendible in a cluster. In the future it will be interesting to use Docker to provision the environment, but currently is a work in progress.
 
 First, we should download all the libraries and dependencies of the project. For the Python side, we have to install the libraries listed in the requirements.txt file. Just type the following in the terminal:
 ```
@@ -22,6 +25,8 @@ Then, install Kafka and create some topics:
 
 raw_tweets will store the tweets retrieved from the Streaming API.
 processed_tweets will store the tweets with the extra information, this is, topics and sentiment.
+
+Now, it's time to download and install Spark. This project has been developed with Spark 2.0.3, so it is just a matter of following its documentation.
 
 And finally, we could install Grafana and Kibana as an easy way to visualize the results, but it's not required.
 
@@ -40,7 +45,7 @@ We receive the data from the Twitter Streaming API, and then we store it raw in 
 
 We can start this process by typing the following in the terminal:
 ```
-python kafka-producer.py
+python /kafka_utils/kafka_producer.py
 ```
 
 ## LDA Model
@@ -66,7 +71,14 @@ The streaming process can be started using this command:
 spark-submit --jars jars/spark-streaming-kafka-0-8-assembly_2.11-2.0.2.jar,aws-java-sdk-1.7.4.jar,hadoop-aws-2.7.3.jar,elasticsearch-spark-20_2.10-5.2.2.jar ./stream.py
 ```
 
+On the other hand, this script also stores the new tweets directly into S3 in raw format. As we saw before, the LDA model reads from S3 in order to obtain the texts which allow to create the model.
+
 ## Storing tweets in Elastic and InfluxDB
 Saving the RDDs into Elasticsearch is pretty straighforward once you have configured it properly (for more information about it, check this out: https://gist.github.com/adrianva/0bc59ba3bb24f0c7d9b4e89e8c621af9). As for InfluxDB, we use the Python Client, which makes saving the data a piece of cake.
+
+## Aggregating data
+Elasticsearch is used to store the most recent data, something like the last 14 days or so, but for historical data we have chosen InfluxDB, a time series database which scales pretty well.
+
+At the moment, the data is aggregated each hour, using Spark Streaming for this task. We use a window of 3600s (1 hour) with a slide duration of 10s. Every time we write into InfluxDB we store the number of tweets for a given topic each hour. 
 
 ## Visualizing it
