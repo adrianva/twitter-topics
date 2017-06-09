@@ -14,6 +14,7 @@ from pyspark.ml.clustering import LocalLDAModel
 import utils
 import ml_utils
 from tweet import Tweet
+from kafka_utils.kafka_producer import KafkaProducer
 from kafka_utils.kafka_sink import KafkaSink
 
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
@@ -26,7 +27,16 @@ def parse_tweets(tweets):
 
 
 def save_stream(rdd):
+    rdd.foreach(lambda x: number_of_tweets.add(1))
+    print number_of_tweets.value
     rdd.saveAsTextFile("s3a://twitter-topics-tweets-streaming/" + datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+
+    producer = KafkaProducer(
+        bootstrap_servers='localhost:9092',
+        value_serializer=lambda v: json.dumps(v).encode('utf-8')
+    )
+
+    producer.send("signals", {"number_of_tweets": number_of_tweets.value})
 
 
 def save_to_elastic(rdd):
@@ -116,7 +126,6 @@ def classify_tweets(time, rdd):
         tweets_with_prediction_df = sql_context.createDataFrame(tweets_with_prediction)
         tweets_with_prediction_df.registerTempTable("tweets")
         exploded_tweets = sql_context.sql("select id_str, timestamp_ms, explode(topic_distribution) from tweets")
-        print exploded_tweets.take(5)
         exploded_tweets.foreachPartition(write_to_kafka)
     except Exception:
         print sys.exc_info()
@@ -138,6 +147,8 @@ if __name__ == "__main__":
     sc._jsc.hadoopConfiguration().set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
     sc._jsc.hadoopConfiguration().set('fs.s3a.access.key', AWS_ACCESS_KEY_ID)
     sc._jsc.hadoopConfiguration().set('fs.s3a.secret.key', AWS_SECRET_ACCESS_KEY)
+
+    number_of_tweets = sc.accumulator(0)
 
     # Kafka connection
     brokers = 'localhost:9092'

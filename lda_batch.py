@@ -15,7 +15,7 @@ AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 NUMBER_OF_TOPICS = 3
 
 
-if __name__ == "__main__":
+def main():
     sys.stdout = codecs.getwriter('utf8')(sys.stdout)
     sys.stderr = codecs.getwriter('utf8')(sys.stderr)
 
@@ -53,3 +53,6 @@ if __name__ == "__main__":
     lda_model.save("s3a://current-models/LDAModel")
 
     sc.stop()
+
+if __name__ == "__main__":
+    main()
