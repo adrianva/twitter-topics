@@ -82,3 +82,4 @@ Elasticsearch is used to store the most recent data, something like the last 14 
 At the moment, the data is aggregated each hour, using Spark Streaming for this task. We use a window of 3600s (1 hour) with a slide duration of 10s. Every time we write into InfluxDB we store the number of tweets for a given topic each hour. 
 
 ## Visualizing it
+For the visualization side we will use both Kibana and Grafana. These tools allow us to create simple dashboards with little effort. Kibana will read the data stored in Elastic and Grafana will do the same with Grafana.
