@@ -5,8 +5,9 @@ Topic extraction from Streaming Twitter API, implementing some Lambda Architectu
 * Python libraries
 * InfluxDB and Elasticsearch
 * Kafka
-* Kibana and Grafana (optional)
 * Spark (version 2.0 or above)
+* Kibana and Grafana (optional)
+* Environment variables
 
 This tutorial will explain how to install the project in a local environment, but this should be easily extendible in a cluster. In the future it will be interesting to use Docker to provision the environment, but currently is a work in progress.
 
@@ -28,16 +29,20 @@ processed_tweets will store the tweets with the extra information, this is, topi
 
 Now, it's time to download and install Spark. This project has been developed with Spark 2.0.3, so it is just a matter of following its documentation.
 
-And finally, we could install Grafana and Kibana as an easy way to visualize the results, but it's not required.
+If we want to visualize the data we can install Grafana and Kibana as an easy way to visualize the results, but it's not required.
+
+And finally, we must set some environement variables (AWS_ACCESS_KEY_ID and AWS_ACCESS_KEY_SECRET) in order to get access to S3.
 
 ## Initializing all services
 We need to be sure that all services are running:
 
-1. Kafka: 
+1. Zookeeper
+```zkserver start```
+2. Kafka: 
 ```kafka-server-start /usr/local/etc/kafka/server.properties```
-2. Elasticsearh:
+3. Elasticsearh:
 ```elasticsearch```
-3. InfluxDB:
+4. InfluxDB:
 ```influxd```
 
 ## Twitter Streaming API
