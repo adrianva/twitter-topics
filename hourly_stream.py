@@ -13,7 +13,7 @@ from influxdb import InfluxDBClient
 
 def get_hour(timestamp_ms):
     d = datetime.fromtimestamp(int(timestamp_ms) / 1000.0)
-    # String format: YYMMDDHH00 (e.g: 20170504120000 -> 2017-05-04 12:00:00)
+    # String format: YYMMDDHH0000 (e.g: 20170504120000 -> 2017-05-04 12:00:00)
     hour_str = d.strftime('%Y')+d.strftime('%m')+d.strftime('%d')+d.strftime('%H')+"0000"
     return hour_str
 
